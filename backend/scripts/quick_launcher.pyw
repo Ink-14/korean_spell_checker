@@ -424,6 +424,7 @@ HTML = """
   <button class="tab-btn"        onclick="switchTab('spell')">맞춤법 검사</button>
   <button class="tab-btn"        onclick="switchTab('dict')">사전 검색</button>
   <button class="tab-btn"        onclick="switchTab('folder')">폴더 읽기</button>
+  <button class="tab-btn"        onclick="switchTab('rule'); initRuleTab();">규칙 제작</button>
 </div>
 
 <!-- ════ 토크나이저 탭 ════ -->
@@ -562,6 +563,75 @@ HTML = """
   </div>
 
   <div id="folder-results-area" style="margin-top:14px;"></div>
+</div>
+
+<!-- ════ 규칙 제작 탭 ════ -->
+<div id="pane-rule" class="tab-pane">
+  <style>
+    #pane-rule .rule-add-btn { padding:2px 8px; font-size:11px; background:var(--accent); color:#fff; border-radius:var(--r-sm); }
+    #pane-rule .rule-add-btn:hover { background:var(--accent-dark); }
+    #pane-rule .rule-mini { padding:2px 8px; font-size:12px; background:var(--muted); color:#fff; border-radius:var(--r-sm); }
+    #pane-rule .rule-mini:hover { background:var(--text); }
+    #pane-rule .rule-mini.danger { background:var(--danger); }
+    #pane-rule select { padding:4px 6px; }
+    #pane-rule .meta-field { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
+    #pane-rule .meta-field > span { font-size:12px; color:var(--muted); }
+  </style>
+
+  <h2>규칙 제작</h2>
+
+  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+    <div class="meta-field">
+      <span>id</span>
+      <input id="rule-id" class="dict-input" style="min-width:240px;" placeholder="예: VV_큰소리치다_붙여쓰기">
+    </div>
+    <div class="meta-field">
+      <span>rank (선택)</span>
+      <input id="rule-rank" class="dict-input" type="number" style="width:100px;" placeholder="예: 2">
+    </div>
+    <div class="meta-field">
+      <span>errtype (선택)</span>
+      <select id="rule-errtype" style="min-width:190px;"><option value="">(생략)</option></select>
+    </div>
+  </div>
+
+  <div class="meta-field" style="margin-bottom:14px;">
+    <span>msg (에러 메시지 · 직접 입력)</span>
+    <textarea id="rule-msg" style="height:52px;" placeholder="예: '큰소리치다'로 붙여 써야 합니다."></textarea>
+  </div>
+
+  <h2>토큰에서 조건 만들기</h2>
+  <textarea id="rule-input" placeholder="분석할 문장을 입력하세요.&#10;Enter로 토크나이징, Shift+Enter로 줄바꿈"></textarea>
+  <div class="toolbar">
+    <button class="btn-primary" onclick="ruleTokenize()">토크나이징</button>
+    <div class="status" id="rule-status" style="margin-top:0; flex:1;"></div>
+  </div>
+  <div id="rule-tokens" class="result-area"></div>
+
+  <h2 style="margin-top:18px;">직접 조건 추가</h2>
+  <div class="toolbar">
+    <button class="btn-success" onclick="addSimpleStep('any')">+any</button>
+    <button class="btn-success" onclick="addSimpleStep('first')">+first</button>
+    <button class="btn-success" onclick="addSimpleStep('any_batchim')">+any_batchim</button>
+    <button class="btn-success" onclick="addSimpleStep('no_batchim')">+no_batchim</button>
+    <button class="btn-success" onclick="addSimpleStep('batchim')">+batchim…</button>
+    <button class="btn-success" onclick="addSimpleStep('length')">+length…</button>
+    <button class="btn-success" onclick="addSimpleStep('longer')">+longer…</button>
+  </div>
+
+  <h2 style="margin-top:18px;">조립된 조건 (순서대로)
+    <button class="btn-danger" style="font-size:11px; padding:3px 10px; margin-left:8px;" onclick="clearSteps()">전체 지우기</button>
+  </h2>
+  <div style="font-size:12px; color:var(--subtle); margin-bottom:4px;">
+    ※ 첫 조건에 opt를 걸면 build 시 에러가 납니다. (opt는 필수 조건 뒤에만)
+  </div>
+  <div id="rule-steps"></div>
+
+  <div class="toolbar" style="margin-top:16px;">
+    <button class="btn-primary" onclick="generateRuleCode()">코드 생성</button>
+    <button class="btn-warning" onclick="copyRuleCode()">복사</button>
+  </div>
+  <textarea id="rule-code" readonly style="height:180px; font-family:monospace; margin-top:8px;"></textarea>
 </div>
 
 <script>
@@ -1495,6 +1565,226 @@ document.addEventListener('keydown', function(e) {
     if (e.code === 'Space') { e.preventDefault(); addFrozenSpanFromSelection(e); return; }
   }
 });
+
+/* ════ 규칙 제작 ════ */
+let _ruleTagNames = [];
+let _ruleTabInited = false;
+let _ruleTokens = [];
+let ruleSteps = [];
+const RULE_NL = String.fromCharCode(10);
+
+function setRuleStatus(msg) {
+  document.getElementById('rule-status').textContent = msg;
+}
+
+async function initRuleTab() {
+  if (_ruleTabInited) return;
+  _ruleTabInited = true;
+  try {
+    const tg = await pywebview.api.get_tag_names();
+    _ruleTagNames = tg.tags || [];
+  } catch (e) { _ruleTagNames = []; }
+  try {
+    const et = await pywebview.api.get_spell_error_type_names();
+    const sel = document.getElementById('rule-errtype');
+    sel.innerHTML = ['<option value="">(생략)</option>']
+      .concat((et.types || []).map(t => '<option value="' + t + '">' + t + '</option>'))
+      .join('');
+  } catch (e) {}
+  renderRuleSteps();
+}
+
+document.getElementById('rule-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ruleTokenize(); }
+});
+
+async function ruleTokenize() {
+  const text = document.getElementById('rule-input').value.trim();
+  if (!text) return;
+  setRuleStatus('토크나이징 중…');
+  document.getElementById('rule-tokens').innerHTML = '';
+  const result = await pywebview.api.tokenize(text);
+  if (result.error) { setRuleStatus('오류: ' + result.error); return; }
+  setRuleStatus('완료 (' + result.tokens.length + '개 토큰)');
+  renderRuleTokenTable(result.tokens);
+}
+
+function renderRuleTokenTable(tokens) {
+  _ruleTokens = tokens;
+  if (!tokens.length) {
+    document.getElementById('rule-tokens').innerHTML =
+      '<div style="color:#888;margin-top:8px;">결과 없음</div>';
+    return;
+  }
+  const tbody = tokens.map(t => {
+    const btns =
+        '<button class="rule-add-btn" onclick="addTokTag(' + t.i + ')">+tag</button> '
+      + '<button class="rule-add-btn" onclick="addTokForm(' + t.i + ')">+form</button> '
+      + '<button class="rule-add-btn" onclick="addTokTagForm(' + t.i + ')">+tag_form</button> '
+      + '<button class="rule-add-btn" onclick="addTokLemma(' + t.i + ')">+lemma</button>';
+    return '<tr><td>' + t.i + '</td>'
+      + '<td>' + escapeHtml(t.form) + '</td>'
+      + '<td class="tag">' + escapeHtml(t.tag) + '</td>'
+      + '<td>' + btns + '</td></tr>';
+  }).join('');
+  document.getElementById('rule-tokens').innerHTML =
+    '<table class="token-table"><thead><tr><th>#</th><th>form</th><th>tag</th><th>조건 추가</th></tr></thead><tbody>'
+    + tbody + '</tbody></table>';
+}
+
+function _tokTag(i) {
+  const t = _ruleTokens[i];
+  if (!t) return null;
+  return t.tag_name || (t.tag || '').split('(')[0];
+}
+function addTokTag(i)     { const t = _ruleTokens[i]; if (t) addStep({ method: 'tag', tag: _tokTag(i) }); }
+function addTokForm(i)    { const t = _ruleTokens[i]; if (t) addStep({ method: 'form', value: t.form }); }
+function addTokTagForm(i) { const t = _ruleTokens[i]; if (t) addStep({ method: 'tag_form', tag: _tokTag(i), value: t.form }); }
+function addTokLemma(i)   { const t = _ruleTokens[i]; if (t) addStep({ method: 'lemma', value: t.lemma || t.form }); }
+
+function addSimpleStep(method) {
+  if (method === 'batchim') {
+    const b = prompt('받침 자모(조합형)를 입력하세요. 예: ᆫ', '');
+    if (b === null) return;
+    addStep({ method: 'batchim', value: b });
+  } else if (method === 'length' || method === 'longer') {
+    const n = prompt('길이(정수)를 입력하세요.', '2');
+    if (n === null) return;
+    addStep({ method, value: n });
+  } else {
+    addStep({ method });
+  }
+}
+
+function addStep(step) {
+  ruleSteps.push(Object.assign({ spacing: 'ANY', opt: false, context: false }, step));
+  renderRuleSteps();
+}
+
+function moveStep(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= ruleSteps.length) return;
+  const tmp = ruleSteps[i]; ruleSteps[i] = ruleSteps[j]; ruleSteps[j] = tmp;
+  renderRuleSteps();
+}
+function deleteStep(i) { ruleSteps.splice(i, 1); renderRuleSteps(); }
+function clearSteps() { ruleSteps = []; renderRuleSteps(); }
+
+function tagOptions(selected) {
+  return _ruleTagNames.map(t =>
+    '<option value="' + t + '"' + (t === selected ? ' selected' : '') + '>' + t + '</option>'
+  ).join('');
+}
+function spacingOptions(sel) {
+  return [['ANY', '간격 무관'], ['SPACED', 'if_spaced'], ['ATTACHED', 'if_not_spaced']]
+    .map(pair => '<option value="' + pair[0] + '"' + (pair[0] === sel ? ' selected' : '') + '>' + pair[1] + '</option>')
+    .join('');
+}
+
+function renderRuleSteps() {
+  const c = document.getElementById('rule-steps');
+  if (!ruleSteps.length) {
+    c.innerHTML = '<div style="color:var(--subtle); margin-top:6px;">아직 조건이 없습니다. 토큰의 버튼이나 [직접 조건 추가]로 추가하세요.</div>';
+    return;
+  }
+  c.innerHTML = ruleSteps.map((s, i) => renderStepRow(s, i)).join('');
+}
+
+function renderStepRow(s, i) {
+  const hasTag = (s.method === 'tag' || s.method === 'tag_form');
+  const hasVal = ['form', 'tag_form', 'lemma', 'batchim', 'length', 'longer'].includes(s.method);
+  const isNum = (s.method === 'length' || s.method === 'longer');
+
+  let ctrl = '<span style="font-family:monospace; font-weight:600; color:var(--accent);">' + s.method + '</span> ';
+  if (hasTag) {
+    ctrl += 'Tag.<select onchange="ruleSteps[' + i + '].tag=this.value">' + tagOptions(s.tag) + '</select> ';
+  }
+  if (hasVal) {
+    ctrl += '<input ' + (isNum ? 'type="number"' : 'type="text"')
+      + ' value="' + escapeHtml(s.value != null ? s.value : '') + '"'
+      + ' oninput="ruleSteps[' + i + '].value=this.value"'
+      + ' style="width:' + (isNum ? '80px' : '150px') + '; padding:3px 6px;" placeholder="값">';
+  }
+
+  const flags =
+      '<label style="display:inline-flex;">간격 <select onchange="ruleSteps[' + i + '].spacing=this.value" style="margin-left:4px;">' + spacingOptions(s.spacing) + '</select></label> '
+    + '<label style="display:inline-flex; margin-left:12px;"><input type="checkbox" ' + (s.opt ? 'checked' : '') + ' onchange="ruleSteps[' + i + '].opt=this.checked"> opt</label> '
+    + '<label style="display:inline-flex; margin-left:12px;"><input type="checkbox" ' + (s.context ? 'checked' : '') + ' onchange="ruleSteps[' + i + '].context=this.checked"> context</label>';
+
+  const controls =
+      '<button class="rule-mini" onclick="moveStep(' + i + ',-1)">↑</button> '
+    + '<button class="rule-mini" onclick="moveStep(' + i + ',1)">↓</button> '
+    + '<button class="rule-mini danger" onclick="deleteStep(' + i + ')">✕</button>';
+
+  return '<div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:8px 12px; margin-top:6px;">'
+    + '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">'
+    +   '<span style="color:var(--subtle); font-size:12px; width:20px;">' + (i + 1) + '</span>'
+    +   '<div style="flex:1; min-width:220px;">' + ctrl + '</div>'
+    +   '<div>' + controls + '</div>'
+    + '</div>'
+    + '<div style="margin-top:6px; font-size:12px; color:var(--muted);">' + flags + '</div>'
+    + '</div>';
+}
+
+function pyStr(s) {
+  return JSON.stringify(String(s));
+}
+
+function stepToCode(s) {
+  let call;
+  switch (s.method) {
+    case 'tag':         call = '.tag(Tag.' + (s.tag || '') + ')'; break;
+    case 'form':        call = '.form(' + pyStr(s.value || '') + ')'; break;
+    case 'tag_form':    call = '.tag_form(Tag.' + (s.tag || '') + ', ' + pyStr(s.value || '') + ')'; break;
+    case 'lemma':       call = '.lemma(' + pyStr(s.value || '') + ')'; break;
+    case 'batchim':     call = '.batchim(' + pyStr(s.value || '') + ')'; break;
+    case 'any_batchim': call = '.any_batchim()'; break;
+    case 'no_batchim':  call = '.no_batchim()'; break;
+    case 'any':         call = '.any()'; break;
+    case 'first':       call = '.first()'; break;
+    case 'length':      call = '.length(' + (parseInt(s.value) || 0) + ')'; break;
+    case 'longer':      call = '.longer(' + (parseInt(s.value) || 0) + ')'; break;
+    default:            call = '';
+  }
+  if (s.spacing === 'SPACED') call += '.if_spaced()';
+  else if (s.spacing === 'ATTACHED') call += '.if_not_spaced()';
+  if (s.opt) call += '.opt()';
+  if (s.context) call += '.context()';
+  return call;
+}
+
+function generateRuleCode() {
+  const id = document.getElementById('rule-id').value.trim();
+  const rank = document.getElementById('rule-rank').value.trim();
+  const errtype = document.getElementById('rule-errtype').value;
+  const msg = document.getElementById('rule-msg').value;
+
+  let head = '*rule()';
+  if (errtype) head += '.errtype(SpellErrorType.' + errtype + ')';
+  if (id) head += '.id(' + pyStr(id) + ')';
+  if (rank !== '') head += '.rank(' + (parseInt(rank) || 0) + ')';
+
+  const lines = [head];
+  ruleSteps.forEach(s => lines.push('    ' + stepToCode(s)));
+  if (msg.trim()) lines.push('    .msg(' + pyStr(msg) + ')');
+  lines[lines.length - 1] += '.build(),';
+
+  document.getElementById('rule-code').value = lines.join(RULE_NL);
+  setRuleStatus('코드를 생성했습니다.');
+}
+
+function copyRuleCode() {
+  const ta = document.getElementById('rule-code');
+  if (!ta.value) generateRuleCode();
+  ta.select();
+  try {
+    document.execCommand('copy');
+    setRuleStatus('복사되었습니다.');
+  } catch (e) {
+    setRuleStatus('복사 실패: 텍스트를 직접 선택해 복사하세요.');
+  }
+}
+
 </script>
 </body>
 </html>
@@ -1572,6 +1862,7 @@ class Api:
                     "form": token.form,
                     "len": token.len,
                     "tag": f"{Tag(token.tag).name}({token.tag})",
+                    "tag_name": Tag(token.tag).name,
                     "base_form": getattr(token, "base_form", token.form),
                     "raw_form": getattr(token, "raw_form", ""),
                     "lemma": getattr(token, "lemma", ""),
@@ -1685,6 +1976,14 @@ class Api:
             if n not in seen:
                 seen.append(n)
         return {"types": seen}
+
+    def get_tag_names(self) -> dict:
+        """Tag enum 이름 전체 반환 (규칙 제작 탭 태그 드롭다운용)."""
+        return {"tags": [t.name for t in Tag]}
+
+    def get_spell_error_type_names(self) -> dict:
+        """SpellErrorType 이름 전체 반환 (규칙 제작 탭 errtype 드롭다운용)."""
+        return {"types": [t.name for t in SpellErrorType]}
 
     # ── 맞춤법 검사 API ─────────────────────────────────────────
 
