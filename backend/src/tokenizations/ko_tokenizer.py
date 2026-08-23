@@ -3,7 +3,7 @@ from pathlib import Path
 
 from kiwipiepy import Kiwi
 
-from src.utils.file_io import get_all_file_paths, make_dictionary_list, make_termbase_list, make_pre_analyzed_dict_list, make_word_and_score_list
+from src.utils.file_io import get_all_file_paths, make_dictionary_list, make_termbase_list, make_pre_analyzed_dict_list, make_word_and_score_list, make_pre_analyzed_dict_list_with_span
 from src.tokenizations.utils import make_없다_VA_MAG_words, make_들다_complex_verbs
 from src.models.interface import Tag
 from src.utils.paths import backend_resource_path
@@ -14,6 +14,7 @@ class KoTokenizer(Kiwi):
 
     DEFAULT_KO_DICT_FILE_NAME = "ko_dictionary"
     DEFAULT_PRE_ANALYZED_DICT_FILE_NAME = "ko_preanalyzed"
+    DEFAULT_PRE_ANALYZED_WITH_SPAN_DICT_FILE_NAME = "ko_preanalyzed_with_span"
     없다_WORDS_FILE_NAME = "없다_words"
     들다_COMPLEX_VERBS_FILE_NAME = "들다_complex_verbs"
 
@@ -53,10 +54,15 @@ class KoTokenizer(Kiwi):
     
         pre_analyzed_file = self.DEFAULT_DICTIONARY_PATH / f"{self.DEFAULT_PRE_ANALYZED_DICT_FILE_NAME}.csv"
         for words in make_pre_analyzed_dict_list(pre_analyzed_file):
-            word, form_tags, score = words
-            self.add_pre_analyzed_word(word, form_tags, score)
+            word, morph, score = words
+            self.add_pre_analyzed_word(word, morph, score)
 
-    def tokenize(self, text: str | list[str], *args, **kwargs):            
+        pre_analyzed_with_span_file = self.DEFAULT_DICTIONARY_PATH / f"{self.DEFAULT_PRE_ANALYZED_WITH_SPAN_DICT_FILE_NAME}.csv"
+        for words in make_pre_analyzed_dict_list_with_span(pre_analyzed_with_span_file):
+            word, morph, score = words
+            self.add_pre_analyzed_word(word, morph, score)
+
+    def tokenize(self, text: str | list[str], *args, **kwargs):
         return super().tokenize(text, *args, **kwargs)
 
     @property

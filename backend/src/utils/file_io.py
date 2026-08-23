@@ -5,6 +5,9 @@ import csv
 from src.models.interface import Tag
 from src.models.constants import DEFAULT_TERMBASE_COL_NAME
 
+Morph = tuple[str, str] | tuple[str, str, int, int]
+PreAnalyzed = tuple[str, list[Morph], float]
+
 warnings.filterwarnings('ignore', message='Data Validation extension is not supported')
 
 def make_dictionary_list(dictionary_file_name: Path) -> list[tuple[str, Tag, int]]:
@@ -25,8 +28,8 @@ def make_dictionary_list(dictionary_file_name: Path) -> list[tuple[str, Tag, int
 			result.append((word, Tag[category], int(score)))
 	return result
 
-def make_pre_analyzed_dict_list(dictionary_file_name: Path) -> list[tuple[str, list[tuple[str, Tag]], float]]:
-	result = []
+def make_pre_analyzed_dict_list(dictionary_file_name: Path) -> list[PreAnalyzed]:
+	result: list[PreAnalyzed] = []
 	with open(dictionary_file_name, encoding='utf-8', newline='') as f:
 		reader = csv.reader(f)
 		next(reader, None)
@@ -37,13 +40,43 @@ def make_pre_analyzed_dict_list(dictionary_file_name: Path) -> list[tuple[str, l
 
 			word = row[0]
 			score = float(row[1]) if row[1] else 0.0
-
 			rest = row[2:]
 			
 			if len(rest) % 2 != 0:
 				raise ValueError(f"Form and Tag mismatched: {row}")
 			
 			result.append((word, [(rest[i], Tag[rest[i+1]].value) for i in range(0, len(rest), 2)], score))
+	return result
+
+def make_pre_analyzed_dict_list_with_span(dictionary_file_name: Path) -> list[PreAnalyzed]:
+	result: list[PreAnalyzed] = []
+	with open(dictionary_file_name, encoding='utf-8', newline='') as f:
+		reader = csv.reader(f)
+		next(reader, None)
+		for row in reader:
+			if not row or not row[0]:
+				continue
+
+			word = row[0]
+			score = float(row[1]) if row[1] else 0.0
+			rest = row[2:]
+
+			if len(rest) % 4 != 0:
+				raise ValueError(f"Expected (form, tag, start, end) groups: {row}")
+
+			analyzed: list[Morph] = []
+
+			for i in range(0, len(rest), 4):
+				form = rest[i]
+				tag = Tag[rest[i + 1]].value
+				start = int(rest[i + 2])
+				end = int(rest[i + 3])
+
+				if not (0 <= start < end <= len(word)):
+					raise ValueError(f"Invalid span [{start}, {end}) for {form!r} in {word!r}: {row}")
+				analyzed.append((form, tag, start, end))
+
+			result.append((word, analyzed, score))
 	return result
 
 def make_termbase_list(termbase_file_name: Path, col_names: list[str] = None) -> list[str]:

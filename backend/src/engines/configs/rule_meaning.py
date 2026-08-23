@@ -165,6 +165,13 @@ _GRAMMAR_DUPLICATED = [
     .tag_form(Tag.보조용언, "지")
     .any()
     .msg("'깃들어지다'는 이중 피동 표현이므로 'merge((\"깃들\", \"동사\"), ({dform[3]}, {dtag[3]}))'batchim(\"으로\", \"로\") 쓸 것을 권장합니다.").build(),
+
+    *rule().id("MEANING_깔려지다")
+    .tag_form(Tag.동사, "깔리")
+    .tag_form(Tag.연결어미, "어")
+    .tag_form(Tag.보조용언, "지")
+    .any()
+    .msg("'깔리어지다'는 이중 피동 표현이므로 'merge((\"깔리\", \"동사\"), ({dform[3]}, {dtag[3]}))'batchim(\"으로\", \"로\") 쓸 것을 권장합니다.").build(),
 ]
 
 MEANING_ERRORS = [

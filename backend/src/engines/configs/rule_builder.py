@@ -418,6 +418,10 @@ class RuleBuilder:
         """
         self.detailed_message = detail
         return self
+    
+    def sup_all(self):
+        self.errtype(SpellErrorType.SUPPRESS_ALL)
+        return self
 
     def rank(self, priority: int):
         """겹치는 다른 규칙과 비교할 출력 우선순위를 개별 지정하는 함수입니다.
@@ -559,7 +563,7 @@ def tag_form(t: Tag, f: str) -> TagAndFormCondition:
     return TagAndFormCondition(form=f, tag=t)
 
 def lemma(l: str) -> LemmaCondition:
-    """표면형 조건. 인자로는 문자열을 받음."""
+    """원형 조건. 인자로는 문자열을 받음."""
     return LemmaCondition(lemma=l)
 
 def length(n: int) -> LengthCondition:
